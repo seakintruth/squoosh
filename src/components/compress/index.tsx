@@ -24,7 +24,7 @@ import { decodeImage } from '../../codecs/decoders';
 import { cleanMerge, cleanSet } from '../../lib/clean-modify';
 import Processor from '../../codecs/processor';
 import {
-  BrowserResizeOptions, isWorkerOptions as isWorkerResizeOptions,
+  BrowserResizeOptions, isWorkerOptions as isWorkerResizeOptions, isHqx, WorkerResizeOptions,
 } from '../../codecs/resize/processor-meta';
 import './custom-els/MultiPanel';
 import Results from '../results';
@@ -106,6 +106,18 @@ async function preprocessImage(
         source.vectorImage,
         preprocessData.resize,
       );
+    } else if (isHqx(preprocessData.resize)) {
+      // Hqx can only do x2, x3 or x4.
+      result = await processor.workerResize(result, preprocessData.resize);
+      // Seems like the globals from Rust from hqx and resize are conflicting.
+      // For now we can fix that by terminating the worker.
+      // TODO: Use wasm-bindgen’s new --web target to create a proper ES6 module
+      // and remove this.
+      processor.terminateWorker();
+      // If the target size is not a clean x2, x3 or x4, use Catmull-Rom
+      // for the remaining scaling.
+      const pixelOpts = { ...preprocessData.resize, method: 'catrom' };
+      result = await processor.workerResize(result, pixelOpts as WorkerResizeOptions);
     } else if (isWorkerResizeOptions(preprocessData.resize)) {
       result = await processor.workerResize(result, preprocessData.resize);
     } else {
@@ -244,7 +256,7 @@ export default class Compress extends Component<Props, State> {
     this.widthQuery.addListener(this.onMobileWidthChange);
     this.updateFile(props.file);
 
-    import('../../lib/offliner').then(({ mainAppLoaded }) => mainAppLoaded());
+    import('../../lib/sw-bridge').then(({ mainAppLoaded }) => mainAppLoaded());
   }
 
   @bind
@@ -567,6 +579,7 @@ export default class Compress extends Component<Props, State> {
     const [leftImageData, rightImageData] = sides.map(i => i.data);
 
     const options = sides.map((side, index) => (
+      // tslint:disable-next-line:jsx-key
       <Options
         source={source}
         mobileView={mobileView}
@@ -582,6 +595,7 @@ export default class Compress extends Component<Props, State> {
       (mobileView ? ['down', 'up'] : ['right', 'left']) as CopyAcrossIconProps['copyDirection'][];
 
     const results = sides.map((side, index) => (
+      // tslint:disable-next-line:jsx-key
       <Results
         downloadUrl={side.downloadUrl}
         imageFile={side.file}
